@@ -55,11 +55,16 @@ def process_document(doc_bytes, replacements):
     return output
 
 # Interface principal
+# Modifique o arquivo app.py, na função main():
 def main():
     # Cabeçalho
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        st.image("logo.png", use_column_width=True)
+    try:
+        col1, col2, col3 = st.columns([1,2,1])
+        with col2:
+            st.image("logo.png", use_column_width=True)
+    except:
+        st.title("Consult Contabilidade")
+    
     st.title("Sistema de Contratos - Consult Contabilidade")
     
     # Menu lateral
