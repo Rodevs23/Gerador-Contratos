@@ -4,6 +4,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import io
+import json
 
 # Configuração da página
 st.set_page_config(
@@ -12,112 +13,188 @@ st.set_page_config(
     layout="wide"
 )
 
-# Função para carregar ou criar banco de dados de modelos
-def load_templates():
-    if 'templates.csv' not in os.listdir():
-        df = pd.DataFrame(columns=['nome', 'arquivo', 'variaveis'])
-        df.to_csv('templates.csv', index=False)
-    return pd.read_csv('templates.csv')
-
-# Função para salvar modelo
-def save_template(nome, arquivo, variaveis):
-    df = load_templates()
-    new_row = pd.DataFrame({
-        'nome': [nome],
-        'arquivo': [arquivo],
-        'variaveis': [variaveis]
-    })
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv('templates.csv', index=False)
-
-# Função para processar documento
-def process_document(doc_bytes, replacements):
-    doc = Document(io.BytesIO(doc_bytes))
+# Estilo personalizado com as cores da Consult
+st.markdown("""
+    <style>
+    /* Cores corporativas */
+    :root {
+        --primary-color: #005B96;
+        --secondary-color: #6497B1;
+    }
     
-    # Substituir todas as variáveis no documento
-    for paragraph in doc.paragraphs:
-        for key, value in replacements.items():
-            if f'#{key}#' in paragraph.text:
-                paragraph.text = paragraph.text.replace(f'#{key}#', value)
+    .header {
+        background-color: var(--primary-color);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+        text-align: center;
+    }
     
-    # Também substituir em tabelas
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for key, value in replacements.items():
-                    if f'#{key}#' in cell.text:
-                        cell.text = cell.text.replace(f'#{key}#', value)
+    .selected-text {
+        background-color: #e3f2fd;
+        padding: 2px 5px;
+        border-radius: 3px;
+        cursor: pointer;
+    }
     
-    # Salvar documento modificado
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
-    return output
+    .variable-tag {
+        background-color: #005B96;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.9em;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# Interface principal
-# Modifique o arquivo app.py, na função main():
+# Função para carregar/criar banco de modelos
+def load_models():
+    if 'models.json' not in os.listdir():
+        with open('models.json', 'w') as f:
+            json.dump([], f)
+    with open('models.json', 'r') as f:
+        return json.load(f)
+
 def main():
-    # Cabeçalho
-    try:
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            st.image("logo.png", use_column_width=True)
-    except:
-        st.title("Consult Contabilidade")
+    st.markdown("""
+        <div class="header">
+            <img src="logo.png" style="max-width: 200px; margin-bottom: 1rem;">
+            <h1>Sistema de Contratos</h1>
+        </div>
+    """, unsafe_allow_html=True)
     
-    st.title("Sistema de Contratos - Consult Contabilidade")
+    # Menu principal com botões ao invés de sidebar
+    col1, col2, col3 = st.columns([1,1,2])
+    with col1:
+        if st.button("📝 Criar Modelo", use_container_width=True):
+            st.session_state.page = "create_model"
+    with col2:
+        if st.button("📄 Gerar Contrato", use_container_width=True):
+            st.session_state.page = "generate_contract"
     
-    # Menu lateral
-    menu = st.sidebar.selectbox(
-        "Menu",
-        ["Gerar Contrato", "Gerenciar Modelos"]
-    )
-    
-    if menu == "Gerar Contrato":
-        show_contract_generation()
+    # Inicializar estado da sessão se necessário
+    if 'page' not in st.session_state:
+        st.session_state.page = "create_model"
+        
+    # Mostrar página apropriada
+    if st.session_state.page == "create_model":
+        show_model_creation()
     else:
-        show_template_management()
+        show_contract_generation()
+
+def show_model_creation():
+    st.subheader("Criar Novo Modelo de Contrato")
+    
+    # Upload do arquivo
+    uploaded_file = st.file_uploader("Selecione o arquivo do contrato (.docx)", type=['docx'])
+    
+    if uploaded_file:
+        # Carregar documento
+        doc = Document(uploaded_file)
+        doc_text = []
+        
+        # Extrair texto do documento
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                doc_text.append(paragraph.text)
+        
+        # Mostrar texto do documento
+        st.markdown("### Selecione os textos que serão variáveis")
+        st.info("Clique no texto para marcar como variável")
+        
+        # Área do documento com textos selecionáveis
+        for i, text in enumerate(doc_text):
+            # Criar elementos clicáveis
+            if st.button(f"{text}", key=f"text_{i}", help="Clique para marcar como variável"):
+                # Abrir modal para definir nome da variável
+                with st.form(f"variable_form_{i}"):
+                    st.write("Texto selecionado:", text)
+                    variable_name = st.text_input("Nome da variável:").upper()
+                    if st.form_submit_button("Confirmar"):
+                        # Salvar variável
+                        if 'variables' not in st.session_state:
+                            st.session_state.variables = []
+                        st.session_state.variables.append({
+                            'text': text,
+                            'variable': variable_name,
+                            'position': i
+                        })
+                        st.success(f"Variável {variable_name} adicionada!")
+        
+        # Mostrar variáveis definidas
+        if 'variables' in st.session_state and st.session_state.variables:
+            st.markdown("### Variáveis Definidas")
+            for var in st.session_state.variables:
+                st.markdown(f"**{var['text']}** → #{var['variable']}#")
+        
+        # Botão para salvar modelo
+        if st.button("💾 Salvar Modelo"):
+            model_name = st.text_input("Nome do modelo:")
+            if model_name:
+                # Salvar modelo
+                models = load_models()
+                models.append({
+                    'name': model_name,
+                    'file': uploaded_file.name,
+                    'file_content': uploaded_file.getvalue(),
+                    'variables': st.session_state.variables,
+                    'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                with open('models.json', 'w') as f:
+                    json.dump(models, f)
+                st.success("Modelo salvo com sucesso!")
 
 def show_contract_generation():
-    st.header("Gerar Contrato")
+    st.subheader("Gerar Novo Contrato")
     
     # Carregar modelos disponíveis
-    df_templates = load_templates()
-    if len(df_templates) == 0:
-        st.warning("Nenhum modelo cadastrado. Por favor, adicione um modelo primeiro.")
+    models = load_models()
+    
+    if not models:
+        st.warning("Nenhum modelo cadastrado. Por favor, crie um modelo primeiro.")
         return
     
     # Selecionar modelo
-    template_name = st.selectbox(
-        "Selecione o modelo",
-        df_templates['nome'].tolist()
-    )
+    model_names = [m['name'] for m in models]
+    selected_model = st.selectbox("Selecione o modelo:", model_names)
     
-    # Carregar template selecionado
-    template = df_templates[df_templates['nome'] == template_name].iloc[0]
-    variables = eval(template['variaveis'])  # Lista de variáveis do template
+    # Encontrar modelo selecionado
+    model = next(m for m in models if m['name'] == selected_model)
     
-    # Criar formulário para preenchimento
+    # Criar formulário com campos dinâmicos
     with st.form("contract_form"):
         st.subheader("Preencha as informações")
         
-        # Criar campos dinâmicos baseados nas variáveis do template
+        # Valores para substituição
         values = {}
         col1, col2 = st.columns(2)
         
-        for i, var in enumerate(variables):
+        for i, var in enumerate(model['variables']):
             with col1 if i % 2 == 0 else col2:
-                values[var] = st.text_input(var.replace('_', ' ').title())
+                values[var['variable']] = st.text_input(
+                    var['variable'].replace('_', ' ').title(),
+                    help=f"Texto original: {var['text']}"
+                )
         
-        submitted = st.form_submit_button("Gerar Contrato")
-        
-        if submitted:
+        if st.form_submit_button("Gerar Contrato"):
             try:
-                # Carregar documento base
-                doc_bytes = template['arquivo'].encode()
+                # Carregar documento original
+                doc = Document(io.BytesIO(model['file_content']))
                 
-                # Processar documento
-                output = process_document(doc_bytes, values)
+                # Substituir variáveis
+                for paragraph in doc.paragraphs:
+                    for var in model['variables']:
+                        if var['text'] in paragraph.text:
+                            paragraph.text = paragraph.text.replace(
+                                var['text'],
+                                values[var['variable']]
+                            )
+                
+                # Salvar documento modificado
+                output = io.BytesIO()
+                doc.save(output)
+                output.seek(0)
                 
                 # Oferecer download
                 st.download_button(
@@ -131,49 +208,6 @@ def show_contract_generation():
                 
             except Exception as e:
                 st.error(f"Erro ao gerar contrato: {str(e)}")
-
-def show_template_management():
-    st.header("Gerenciar Modelos")
-    
-    # Mostrar modelos existentes
-    df_templates = load_templates()
-    if len(df_templates) > 0:
-        st.subheader("Modelos Cadastrados")
-        st.dataframe(df_templates[['nome', 'variaveis']])
-    
-    # Adicionar novo modelo
-    st.subheader("Adicionar Novo Modelo")
-    
-    with st.form("template_form"):
-        nome = st.text_input("Nome do Modelo")
-        arquivo = st.file_uploader("Arquivo do Modelo (.docx)", type=['docx'])
-        variaveis = st.text_area(
-            "Variáveis (uma por linha)",
-            help="Digite as variáveis do modelo, uma em cada linha"
-        )
-        
-        submitted = st.form_submit_button("Salvar Modelo")
-        
-        if submitted:
-            if nome and arquivo and variaveis:
-                try:
-                    # Processar variáveis
-                    vars_list = [v.strip() for v in variaveis.split('\n') if v.strip()]
-                    
-                    # Salvar modelo
-                    save_template(
-                        nome,
-                        arquivo.read(),
-                        str(vars_list)
-                    )
-                    
-                    st.success("Modelo salvo com sucesso!")
-                    st.experimental_rerun()
-                    
-                except Exception as e:
-                    st.error(f"Erro ao salvar modelo: {str(e)}")
-            else:
-                st.error("Por favor, preencha todos os campos")
 
 if __name__ == "__main__":
     main()
