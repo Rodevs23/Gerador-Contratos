@@ -24,11 +24,15 @@ class GeradorContratosStreamlit:
         self.initialize_session_state()
         self.setup_folders()
 
-    @staticmethod
+    # Modificado para usar _self
     @st.cache_data
-    def load_document(file):
+    def load_document(_self, file):
         """Carrega o documento com cache do Streamlit"""
-        return Document(file)
+        try:
+            return Document(file)
+        except Exception as e:
+            st.error(f"Erro ao carregar documento: {str(e)}")
+            return None
     def setup_folders(self):
         """Cria as pastas necessárias para o funcionamento do sistema"""
         for folder in ['templates', 'backups', 'temp']:
@@ -111,11 +115,13 @@ class GeradorContratosStreamlit:
         
         if uploaded_file:
             try:
+                # Aqui usamos o _self
                 doc = self.load_document(uploaded_file)
-                st.session_state.current_content = '\n'.join(para.text for para in doc.paragraphs)
-                st.session_state.original_file = uploaded_file
-                
-                # Área de texto
+                if doc:  # Verifica se o documento foi carregado com sucesso
+                    st.session_state.current_content = '\n'.join(para.text for para in doc.paragraphs)
+                    st.session_state.original_file = uploaded_file
+                    
+                 # Área de texto
                 text_area = st.text_area(
                     "Texto do Contrato",
                     value=st.session_state.current_content,
