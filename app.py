@@ -1,172 +1,197 @@
 import streamlit as st
 from docx import Document
-import pandas as pd
-import os
-from datetime import datetime
 import io
 import json
+from datetime import datetime
+import os
 
 # Configuração da página
 st.set_page_config(
-    page_title="Sistema de Contratos - Consult Contabilidade",
+    page_title="Sistema de Contratos - Consult",
     page_icon="📄",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# Estilo personalizado com as cores da Consult
+# Estilo personalizado
 st.markdown("""
     <style>
-    /* Cores corporativas */
-    :root {
-        --primary-color: #005B96;
-        --secondary-color: #6497B1;
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
     }
-    
-    .header {
-        background-color: var(--primary-color);
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
+    .element-container {
+        margin-bottom: 1rem;
+    }
+    .stButton>button {
+        width: 100%;
+        background-color: #005B96;
         color: white;
-        text-align: center;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+        font-weight: 500;
     }
-    
-    .selected-text {
+    .stButton>button:hover {
+        background-color: #004b7a;
+    }
+    .marked-text {
         background-color: #e3f2fd;
         padding: 2px 5px;
         border-radius: 3px;
         cursor: pointer;
     }
-    
-    .variable-tag {
-        background-color: #005B96;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.9em;
+    .variable-input {
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Função para carregar/criar banco de modelos
-def load_models():
+# Funções auxiliares
+def load_or_create_data():
     if 'models.json' not in os.listdir():
         with open('models.json', 'w') as f:
-            json.dump([], f)
+            json.dump({'models': []}, f)
     with open('models.json', 'r') as f:
         return json.load(f)
 
-def main():
-    st.markdown("""
-        <div class="header">
-            <img src="logo.png" style="max-width: 200px; margin-bottom: 1rem;">
-            <h1>Sistema de Contratos</h1>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Menu principal com botões ao invés de sidebar
-    col1, col2, col3 = st.columns([1,1,2])
-    with col1:
-        if st.button("📝 Criar Modelo", use_container_width=True):
-            st.session_state.page = "create_model"
-    with col2:
-        if st.button("📄 Gerar Contrato", use_container_width=True):
-            st.session_state.page = "generate_contract"
-    
-    # Inicializar estado da sessão se necessário
-    if 'page' not in st.session_state:
-        st.session_state.page = "create_model"
-        
-    # Mostrar página apropriada
-    if st.session_state.page == "create_model":
-        show_model_creation()
-    else:
-        show_contract_generation()
+def save_data(data):
+    with open('models.json', 'w') as f:
+        json.dump(data, f)
 
-def show_model_creation():
-    st.subheader("Criar Novo Modelo de Contrato")
+def main():
+    # Header com logo da Consult
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.image("logo.png", width=300)
+
+    # Menu principal com botões
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📝 Criar Modelo de Contrato", use_container_width=True):
+            st.session_state.page = "create"
+    with col2:
+        if st.button("📄 Preencher Contrato", use_container_width=True):
+            st.session_state.page = "fill"
+
+    if 'page' not in st.session_state:
+        st.session_state.page = "create"
+
+    # Separador visual
+    st.markdown("---")
+
+    # Mostrar página apropriada
+    if st.session_state.page == "create":
+        show_create_model()
+    else:
+        show_fill_contract()
+
+def show_create_model():
+    st.header("Criar Modelo de Contrato")
     
-    # Upload do arquivo
-    uploaded_file = st.file_uploader("Selecione o arquivo do contrato (.docx)", type=['docx'])
-    
+    uploaded_file = st.file_uploader(
+        "Selecione o arquivo do contrato (.docx)", 
+        type=['docx'],
+        help="Upload do arquivo do contrato em formato Word (.docx)"
+    )
+
     if uploaded_file:
         # Carregar documento
-        doc = Document(uploaded_file)
-        doc_text = []
-        
-        # Extrair texto do documento
-        for paragraph in doc.paragraphs:
-            if paragraph.text.strip():
-                doc_text.append(paragraph.text)
-        
-        # Mostrar texto do documento
-        st.markdown("### Selecione os textos que serão variáveis")
-        st.info("Clique no texto para marcar como variável")
-        
-        # Área do documento com textos selecionáveis
-        for i, text in enumerate(doc_text):
-            # Criar elementos clicáveis
-            if st.button(f"{text}", key=f"text_{i}", help="Clique para marcar como variável"):
-                # Abrir modal para definir nome da variável
-                with st.form(f"variable_form_{i}"):
-                    st.write("Texto selecionado:", text)
-                    variable_name = st.text_input("Nome da variável:").upper()
-                    if st.form_submit_button("Confirmar"):
-                        # Salvar variável
-                        if 'variables' not in st.session_state:
-                            st.session_state.variables = []
-                        st.session_state.variables.append({
-                            'text': text,
-                            'variable': variable_name,
-                            'position': i
-                        })
-                        st.success(f"Variável {variable_name} adicionada!")
-        
-        # Mostrar variáveis definidas
-        if 'variables' in st.session_state and st.session_state.variables:
-            st.markdown("### Variáveis Definidas")
-            for var in st.session_state.variables:
-                st.markdown(f"**{var['text']}** → #{var['variable']}#")
-        
-        # Botão para salvar modelo
-        if st.button("💾 Salvar Modelo"):
-            model_name = st.text_input("Nome do modelo:")
-            if model_name:
-                # Salvar modelo
-                models = load_models()
-                models.append({
-                    'name': model_name,
-                    'file': uploaded_file.name,
-                    'file_content': uploaded_file.getvalue(),
-                    'variables': st.session_state.variables,
-                    'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                })
-                with open('models.json', 'w') as f:
-                    json.dump(models, f)
-                st.success("Modelo salvo com sucesso!")
+        doc_bytes = uploaded_file.read()
+        doc = Document(io.BytesIO(doc_bytes))
 
-def show_contract_generation():
-    st.subheader("Gerar Novo Contrato")
+        # Mostrar conteúdo do documento
+        st.markdown("### 1. Selecione os textos que serão variáveis")
+        st.info("Clique no texto para definir como variável")
+
+        # Armazenar variáveis na sessão
+        if 'variables' not in st.session_state:
+            st.session_state.variables = []
+
+        # Processar parágrafos
+        for i, paragraph in enumerate(doc.paragraphs):
+            if paragraph.text.strip():
+                # Criar botão para cada parágrafo
+                if st.button(f"{paragraph.text}", key=f"p_{i}"):
+                    with st.expander("Definir Variável", expanded=True):
+                        with st.form(f"var_form_{i}"):
+                            st.write("**Texto selecionado:**")
+                            st.code(paragraph.text)
+                            var_name = st.text_input(
+                                "Nome da variável:",
+                                max_chars=30
+                            ).upper()
+                            if st.form_submit_button("Confirmar"):
+                                new_var = {
+                                    'text': paragraph.text,
+                                    'variable': var_name,
+                                    'position': i
+                                }
+                                st.session_state.variables.append(new_var)
+                                st.success(f"Variável {var_name} adicionada!")
+                                st.experimental_rerun()
+
+        # Mostrar variáveis marcadas
+        if st.session_state.variables:
+            st.markdown("### 2. Variáveis Definidas")
+            for var in st.session_state.variables:
+                col1, col2, col3 = st.columns([3,1,1])
+                with col1:
+                    st.code(f"{var['text']} → #{var['variable']}#")
+                with col3:
+                    if st.button("🗑️", key=f"del_{var['variable']}"):
+                        st.session_state.variables.remove(var)
+                        st.experimental_rerun()
+
+            # Salvar modelo
+            with st.form("save_model"):
+                st.markdown("### 3. Salvar Modelo")
+                model_name = st.text_input("Nome do modelo:")
+                if st.form_submit_button("💾 Salvar Modelo"):
+                    if model_name:
+                        data = load_or_create_data()
+                        new_model = {
+                            'name': model_name,
+                            'file': uploaded_file.name,
+                            'content': doc_bytes,
+                            'variables': st.session_state.variables,
+                            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        data['models'].append(new_model)
+                        save_data(data)
+                        st.success("✅ Modelo salvo com sucesso!")
+                        # Limpar estado
+                        st.session_state.variables = []
+                        st.experimental_rerun()
+
+def show_fill_contract():
+    st.header("Preencher Contrato")
     
-    # Carregar modelos disponíveis
-    models = load_models()
-    
+    # Carregar modelos
+    data = load_or_create_data()
+    models = data.get('models', [])
+
     if not models:
-        st.warning("Nenhum modelo cadastrado. Por favor, crie um modelo primeiro.")
+        st.warning("⚠️ Nenhum modelo cadastrado. Por favor, crie um modelo primeiro.")
         return
-    
+
     # Selecionar modelo
-    model_names = [m['name'] for m in models]
-    selected_model = st.selectbox("Selecione o modelo:", model_names)
-    
+    selected_model_name = st.selectbox(
+        "Selecione o modelo:",
+        options=[m['name'] for m in models]
+    )
+
     # Encontrar modelo selecionado
-    model = next(m for m in models if m['name'] == selected_model)
-    
-    # Criar formulário com campos dinâmicos
-    with st.form("contract_form"):
-        st.subheader("Preencha as informações")
+    model = next(m for m in models if m['name'] == selected_model_name)
+
+    # Formulário de preenchimento
+    with st.form("fill_contract"):
+        st.subheader("Dados do Contrato")
         
-        # Valores para substituição
+        # Criar campos para cada variável
         values = {}
         col1, col2 = st.columns(2)
         
@@ -174,40 +199,41 @@ def show_contract_generation():
             with col1 if i % 2 == 0 else col2:
                 values[var['variable']] = st.text_input(
                     var['variable'].replace('_', ' ').title(),
-                    help=f"Texto original: {var['text']}"
+                    help=f"Original: {var['text']}"
                 )
-        
-        if st.form_submit_button("Gerar Contrato"):
+
+        # Botão de geração
+        if st.form_submit_button("📄 Gerar Contrato"):
             try:
-                # Carregar documento original
-                doc = Document(io.BytesIO(model['file_content']))
+                # Carregar documento
+                doc = Document(io.BytesIO(model['content']))
                 
                 # Substituir variáveis
-                for paragraph in doc.paragraphs:
-                    for var in model['variables']:
+                for var in model['variables']:
+                    for paragraph in doc.paragraphs:
                         if var['text'] in paragraph.text:
                             paragraph.text = paragraph.text.replace(
                                 var['text'],
                                 values[var['variable']]
                             )
                 
-                # Salvar documento modificado
+                # Gerar arquivo
                 output = io.BytesIO()
                 doc.save(output)
                 output.seek(0)
                 
-                # Oferecer download
+                # Botão de download
                 st.download_button(
-                    label="📥 Download do Contrato",
+                    label="⬇️ Download do Contrato",
                     data=output,
                     file_name=f"contrato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
                 
-                st.success("Contrato gerado com sucesso!")
+                st.success("✅ Contrato gerado com sucesso!")
                 
             except Exception as e:
-                st.error(f"Erro ao gerar contrato: {str(e)}")
+                st.error(f"❌ Erro ao gerar contrato: {str(e)}")
 
 if __name__ == "__main__":
     main()
