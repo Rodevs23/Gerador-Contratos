@@ -257,4 +257,27 @@ class GeradorContratosStreamlit:
             # Cria backup antes de salvar
             self.auto_backup(doc, name)
             
+            # Dados do template
             data = {
+                "variables": list(st.session_state.variables.keys()),
+                "last_modified": datetime.now().isoformat(),
+                "version": "1.0"
+            }
+            
+            # Salva metadata
+            with open(template_path / f"{name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # Salva documento
+            doc.save(template_path / f"{name}.docx")
+            
+            st.success("✅ Modelo salvo com sucesso!")
+            st.session_state.variables = {}
+            st.session_state.current_content = ""
+            st.session_state.original_file = None
+            
+            logging.info(f"Template salvo com sucesso: {name}")
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao salvar: {str(e)}")
+            logging.error(f"Erro ao salvar template {name}: {str(e)}")
