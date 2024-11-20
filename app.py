@@ -1,214 +1,223 @@
 import streamlit as st
-import re
+import json
 from pathlib import Path
 from docx import Document
-from docx.shared import Pt, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
+import docx
+import base64
+from docx.shared import Pt, Cm
+import re
 
-# Template fixo do contrato
-TEMPLATE = """CONTRATO DE PRESTAÇÃO DE SERVIÇOS CONTÁBEIS
+def read_docx(file):
+    """Lê o conteúdo de um arquivo .docx"""
+    doc = Document(file)
+    full_text = []
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+    return '\n'.join(full_text)
 
-Por este instrumento particular de Contrato de Prestação de Serviços Contábeis que fazem entre si, de um lado, #RAZAO_SOCIAL#, com sede na cidade de #CIDADE#, Estado do #ESTADO#, na #ENDERECO#, #NUMERO#, inscrita no CNPJ sob nº #CNPJ#, neste ato representada por seu sócio administrador #NOME_RESPONSAVEL#, doravante denominada CONTRATANTE, e de outro lado CONSULT ASSESSORIA CONTÁBIL LTDA, pessoa jurídica de direito privado, inscrita no CNPJ sob nº 11.111.111/0001-11, com sede na Avenida Principal, 123, Centro, Maringá/PR, neste ato representada por seu sócio administrador João da Silva, brasileiro, casado, contador, inscrito no CRC sob nº PR-123456/O-1, doravante denominada CONTRATADA, têm entre si justo e contratado o seguinte:
-
-CLÁUSULA PRIMEIRA - DO OBJETO
-
-1.1. O presente contrato tem por objeto a prestação de serviços de contabilidade, compreendendo os seguintes serviços:
-a) Escrituração contábil;
-b) Escrituração fiscal;
-c) Folha de pagamento;
-d) Declarações fiscais;
-e) Demonstrações contábeis.
-
-CLÁUSULA SEGUNDA - DO PREÇO E FORMA DE PAGAMENTO
-
-2.1. Pelos serviços prestados, a CONTRATANTE pagará à CONTRATADA o valor mensal de R$ #VALOR_CONTRATO# (#VALOR_EXTENSO#), com vencimento todo dia #DIA_VENCIMENTO# de cada mês.
-
-CLÁUSULA TERCEIRA - DA VIGÊNCIA
-
-3.1. O presente contrato tem vigência de 12 (doze) meses, iniciando-se em #DATA_INICIO#, podendo ser renovado por iguais períodos.
-
-CLÁUSULA QUARTA - DAS OBRIGAÇÕES
-
-4.1. São obrigações da CONTRATADA:
-a) Executar os serviços com zelo e dedicação;
-b) Manter sigilo sobre as informações da CONTRATANTE;
-c) Cumprir todos os prazos legais.
-
-4.2. São obrigações da CONTRATANTE:
-a) Fornecer toda documentação necessária;
-b) Efetuar os pagamentos nos prazos acordados;
-c) Comunicar à CONTRATADA qualquer alteração.
-
-E por estarem assim justos e contratados, firmam o presente em duas vias de igual teor.
-
-#CIDADE#, #DATA_ASSINATURA#
-
-
-_______________________________
-#RAZAO_SOCIAL#
-CNPJ: #CNPJ#
-#NOME_RESPONSAVEL#
-
-
-_______________________________
-CONSULT ASSESSORIA CONTÁBIL LTDA
-CNPJ: 11.111.111/0001-11
-João da Silva
-CRC PR-123456/O-1"""
-
-def init_session_state():
-    if 'template_content' not in st.session_state:
-        st.session_state.template_content = TEMPLATE
-    if 'variables' not in st.session_state:
-        # Extrair variáveis do template
-        variables = re.findall(r'#(\w+)#', TEMPLATE)
-        st.session_state.variables = sorted(set(variables))
-
-def format_cnpj(cnpj):
-    """Formata o CNPJ"""
-    cnpj = re.sub(r'\D', '', cnpj)
-    if len(cnpj) != 14:
-        return cnpj
-    return f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
-
-def generate_docx(values):
-    """Gera documento Word formatado"""
-    doc = Document()
+def save_template(name, content, variables):
+    """Salva o template com suas variáveis"""
+    template_path = Path("templates")
+    template_path.mkdir(exist_ok=True)
     
-    # Configurar margens
-    sections = doc.sections
-    for section in sections:
-        section.top_margin = Cm(3)
-        section.bottom_margin = Cm(2)
-        section.left_margin = Cm(3)
-        section.right_margin = Cm(3)
+    data = {
+        "content": content,
+        "variables": variables
+    }
     
-    # Configurar estilo padrão
-    style = doc.styles['Normal']
-    font = style.font
-    font.name = 'Arial'
-    font.size = Pt(11)
+    with open(template_path / f"{name}.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_templates():
+    """Carrega os templates salvos"""
+    template_path = Path("templates")
+    template_path.mkdir(exist_ok=True)
     
-    # Substituir variáveis
-    content = TEMPLATE
-    for var, value in values.items():
-        content = content.replace(f"#{var}#", value)
+    templates = {}
+    for file in template_path.glob("*.json"):
+        with open(file, "r", encoding="utf-8") as f:
+            templates[file.stem] = json.load(f)
+    return templates
+
+def generate_doc_from_template(template_content, variables_values, original_doc):
+    """Gera novo documento mantendo a formatação original"""
+    doc = Document(original_doc)
     
-    # Processar parágrafos
-    for paragraph in content.split('\n'):
-        if not paragraph.strip():
-            continue
-            
-        p = doc.add_paragraph()
-        p.paragraph_format.line_spacing = 1.15
-        p.paragraph_format.space_after = Pt(0)
-        
-        # Título centralizado
-        if "CONTRATO DE PRESTAÇÃO" in paragraph:
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(paragraph)
-            run.bold = True
-        # Cabeçalhos de cláusulas
-        elif paragraph.startswith("CLÁUSULA"):
-            run = p.add_run(paragraph)
-            run.bold = True
-        else:
-            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            p.add_run(paragraph)
-    
-    # Converter para bytes
+    # Substituir variáveis no texto
+    for paragraph in doc.paragraphs:
+        for var_name, var_value in variables_values.items():
+            if f"#{var_name}#" in paragraph.text:
+                paragraph.text = paragraph.text.replace(f"#{var_name}#", var_value)
+
+    # Salvar em bytes
     doc_bytes = io.BytesIO()
     doc.save(doc_bytes)
     doc_bytes.seek(0)
-    
     return doc_bytes
 
 def main():
-    st.set_page_config(
-        page_title="Gerador de Contratos",
-        page_icon="📄",
-        layout="wide"
-    )
+    st.set_page_config(page_title="Gerador de Contratos", layout="wide")
 
-    init_session_state()
+    if "current_content" not in st.session_state:
+        st.session_state.current_content = ""
+    if "variables" not in st.session_state:
+        st.session_state.variables = {}
+    if "original_doc" not in st.session_state:
+        st.session_state.original_doc = None
 
     st.title("Gerador de Contratos")
-    st.markdown("---")
 
-    col1, col2 = st.columns(2)
+    # Menu lateral para escolher a função
+    with st.sidebar:
+        option = st.radio(
+            "Escolha a função:",
+            ["Cadastrar Novo Modelo", "Preencher Contrato"]
+        )
 
-    with col1:
-        st.subheader("Preencher Dados")
-        values = {}
+    if option == "Cadastrar Novo Modelo":
+        st.header("Cadastrar Novo Modelo de Contrato")
         
-        # Campos especiais com formatação
-        for var in st.session_state.variables:
-            if var == "CNPJ":
-                value = st.text_input(
-                    "CNPJ",
-                    help="Formato: XX.XXX.XXX/XXXX-XX",
-                    key=var
-                )
-                values[var] = format_cnpj(value)
-            elif var == "VALOR_CONTRATO":
-                values[var] = st.text_input(
-                    "Valor do Contrato (R$)",
-                    help="Exemplo: 1.000,00",
-                    key=var
-                )
-            elif var == "VALOR_EXTENSO":
-                values[var] = st.text_input(
-                    "Valor por Extenso",
-                    help="Exemplo: um mil reais",
-                    key=var
-                )
-            elif var == "DIA_VENCIMENTO":
-                values[var] = st.text_input(
-                    "Dia do Vencimento",
-                    help="Exemplo: 05",
-                    key=var
-                )
-            elif var == "DATA_INICIO" or var == "DATA_ASSINATURA":
-                values[var] = st.text_input(
-                    var.replace("_", " ").title(),
-                    help="Exemplo: 01/01/2024",
-                    key=var
-                )
-            else:
-                values[var] = st.text_input(
-                    var.replace("_", " ").title(),
-                    key=var
-                )
+        # Nome do template
+        template_name = st.text_input("Nome do Modelo:", key="template_name")
+        
+        # Upload do arquivo
+        uploaded_file = st.file_uploader("Carregar arquivo do contrato (.docx)", type="docx")
+        
+        if uploaded_file:
+            if "current_content" not in st.session_state or not st.session_state.current_content:
+                # Salvar o arquivo original para manter a formatação
+                st.session_state.original_doc = uploaded_file
+                # Ler o conteúdo do arquivo
+                st.session_state.current_content = read_docx(uploaded_file)
 
-        if st.button("Gerar Contrato", type="primary"):
-            empty_fields = [var for var, val in values.items() if not val.strip()]
-            if empty_fields:
-                st.error("Preencha todos os campos!")
-                for field in empty_fields:
-                    st.warning(field.replace("_", " ").title())
-                return
+            # Exibir texto atual e permitir seleção
+            st.subheader("Selecione o texto para criar variáveis:")
+            
+            # Campo de texto para seleção
+            selected_text = st.text_area("Texto do Contrato", 
+                                       st.session_state.current_content,
+                                       height=400,
+                                       key="contract_text")
 
-            try:
-                doc_bytes = generate_docx(values)
+            # Botão para marcar variável
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                text_to_replace = st.text_input("Texto a ser marcado como variável:")
+            with col2:
+                if st.button("Marcar como Variável") and text_to_replace:
+                    # Solicitar nome da variável
+                    var_name = st.text_input("Nome da variável:").upper()
+                    if var_name:
+                        # Substituir no texto
+                        new_content = selected_text.replace(
+                            text_to_replace, 
+                            f"#{var_name}#"
+                        )
+                        st.session_state.current_content = new_content
+                        st.session_state.variables[var_name] = text_to_replace
+                        st.rerun()
+
+            # Exibir variáveis marcadas
+            if st.session_state.variables:
+                st.subheader("Variáveis Marcadas:")
+                for var_name, original_text in st.session_state.variables.items():
+                    st.code(f"#{var_name}# = {original_text}")
+
+            # Salvar template
+            if st.button("Salvar Modelo", type="primary"):
+                if not template_name:
+                    st.error("Digite um nome para o modelo!")
+                    return
                 
-                st.download_button(
-                    "⬇️ Baixar Contrato (DOCX)",
-                    doc_bytes,
-                    file_name=f"contrato_{values['RAZAO_SOCIAL']}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                
-                st.success("Contrato gerado com sucesso!")
-            except Exception as e:
-                st.error(f"Erro ao gerar contrato: {str(e)}")
+                try:
+                    save_template(
+                        template_name,
+                        st.session_state.current_content,
+                        list(st.session_state.variables.keys())
+                    )
+                    # Salvar documento original
+                    template_path = Path("templates")
+                    st.session_state.original_doc.seek(0)
+                    with open(template_path / f"{template_name}_original.docx", "wb") as f:
+                        f.write(st.session_state.original_doc.read())
+                    
+                    st.success("Modelo salvo com sucesso!")
+                    # Limpar estado
+                    st.session_state.current_content = ""
+                    st.session_state.variables = {}
+                    st.session_state.original_doc = None
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {str(e)}")
 
-    with col2:
-        st.subheader("Prévia do Contrato")
-        preview = TEMPLATE
-        for var, val in values.items():
-            preview = preview.replace(f"#{var}#", val if val else f"[{var}]")
-        st.text_area("", value=preview, height=600, disabled=True)
+    else:  # Preencher Contrato
+        st.header("Preencher Contrato")
+        
+        # Carregar templates
+        templates = load_templates()
+        if not templates:
+            st.warning("Nenhum modelo cadastrado. Cadastre um modelo primeiro!")
+            return
+
+        # Selecionar template
+        template_name = st.selectbox(
+            "Selecione o Modelo:",
+            options=list(templates.keys())
+        )
+
+        if template_name:
+            template = templates[template_name]
+            
+            # Criar duas colunas
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Preencher Dados")
+                values = {}
+                # Campo para cada variável
+                for var in template["variables"]:
+                    values[var] = st.text_input(f"{var}:")
+
+                if st.button("Gerar Contrato", type="primary"):
+                    # Verificar campos vazios
+                    empty_fields = [var for var, val in values.items() if not val.strip()]
+                    if empty_fields:
+                        st.error("Preencha todos os campos!")
+                        return
+
+                    try:
+                        # Carregar documento original
+                        original_doc_path = Path("templates") / f"{template_name}_original.docx"
+                        if not original_doc_path.exists():
+                            st.error("Arquivo original do template não encontrado!")
+                            return
+
+                        # Gerar novo documento
+                        doc_bytes = generate_doc_from_template(
+                            template["content"],
+                            values,
+                            original_doc_path
+                        )
+
+                        # Botão de download
+                        st.download_button(
+                            "⬇️ Baixar Contrato",
+                            doc_bytes,
+                            file_name=f"contrato_preenchido.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+
+                        st.success("Contrato gerado com sucesso!")
+                    except Exception as e:
+                        st.error(f"Erro ao gerar contrato: {str(e)}")
+            
+            with col2:
+                st.subheader("Prévia do Contrato")
+                preview = template["content"]
+                for var, val in values.items():
+                    preview = preview.replace(f"#{var}#", val if val else f"[{var}]")
+                st.text_area("", value=preview, height=400, disabled=True)
 
 if __name__ == "__main__":
     main()
