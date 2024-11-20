@@ -24,15 +24,6 @@ class GeradorContratosStreamlit:
         self.initialize_session_state()
         self.setup_folders()
 
-    # Modificado para usar _self
-    @st.cache_data
-    def load_document(_self, file):
-        """Carrega o documento com cache do Streamlit"""
-        try:
-            return Document(file)
-        except Exception as e:
-            st.error(f"Erro ao carregar documento: {str(e)}")
-            return None
     def setup_folders(self):
         """Cria as pastas necessárias para o funcionamento do sistema"""
         for folder in ['templates', 'backups', 'temp']:
@@ -47,10 +38,15 @@ class GeradorContratosStreamlit:
         if 'original_file' not in st.session_state:
             st.session_state.original_file = None
 
+    @staticmethod
     @st.cache_data
-    def load_document(self, file):
+    def load_document(file):
         """Carrega o documento com cache do Streamlit"""
-        return Document(file)
+        try:
+            return Document(file)
+        except Exception as e:
+            st.error(f"Erro ao carregar documento: {str(e)}")
+            return None
 
     def validate_template(self, doc):
         """Valida o template do documento"""
@@ -121,32 +117,32 @@ class GeradorContratosStreamlit:
                     st.session_state.current_content = '\n'.join(para.text for para in doc.paragraphs)
                     st.session_state.original_file = uploaded_file
                     
-                 # Área de texto
-                text_area = st.text_area(
-                    "Texto do Contrato",
-                    value=st.session_state.current_content,
-                    height=300
-                )
+                    # Restante do código...
+                    text_area = st.text_area(
+                        "Texto do Contrato",
+                        value=st.session_state.current_content,
+                        height=300
+                    )
                 
-                # Adicionar variável
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    selected_text = st.text_input("Texto selecionado")
-                with col2:
-                    var_name = st.text_input("Nome da variável").upper()
+                    # Adicionar variável
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        selected_text = st.text_input("Texto selecionado")
+                    with col2:
+                        var_name = st.text_input("Nome da variável").upper()
+                    
+                    if st.button("➕ Adicionar Variável"):
+                        if selected_text and var_name:
+                            self.add_variable(selected_text, var_name)
+                    
+                    # Lista de variáveis
+                    st.subheader("📋 Variáveis Adicionadas")
+                    for var, text in st.session_state.variables.items():
+                        st.text(f"#{var}#: {text}")
                 
-                if st.button("➕ Adicionar Variável"):
-                    if selected_text and var_name:
-                        self.add_variable(selected_text, var_name)
-                
-                # Lista de variáveis
-                st.subheader("📋 Variáveis Adicionadas")
-                for var, text in st.session_state.variables.items():
-                    st.text(f"#{var}#: {text}")
-                
-                # Salvar modelo
-                if st.button("💾 Salvar Modelo"):
-                    self.save_template(template_name)
+                    # Salvar modelo
+                    if st.button("💾 Salvar Modelo"):
+                        self.save_template(template_name)
                 
             except Exception as e:
                 st.error(f"❌ Erro ao carregar arquivo: {str(e)}")
@@ -182,32 +178,33 @@ class GeradorContratosStreamlit:
                 
                 if st.button("🔄 Gerar Contrato"):
                     try:
+                        # Aqui usamos o _self
                         doc = self.load_document(template_path / f"{selected_template}.docx")
+                        if doc:  # Verifica se o documento foi carregado com sucesso
+                            # Substituir variáveis preservando formatação
+                            for var_name, value in values.items():
+                                if not value:
+                                    st.warning(f"⚠️ Campo {var_name} está vazio!")
+                                    return
+                                placeholder = f"#{var_name}#"
+                                self.replace_text_keeping_format(doc, placeholder, value)
                         
-                        # Substituir variáveis preservando formatação
-                        for var_name, value in values.items():
-                            if not value:  # Validação de campos vazios
-                                st.warning(f"⚠️ Campo {var_name} está vazio!")
-                                return
-                            placeholder = f"#{var_name}#"
-                            self.replace_text_keeping_format(doc, placeholder, value)
+                            # Criar backup antes de gerar
+                            self.auto_backup(doc, f"{selected_template}_preenchido")
                         
-                        # Criar backup antes de gerar
-                        self.auto_backup(doc, f"{selected_template}_preenchido")
+                            # Salvar em memória
+                            doc_io = io.BytesIO()
+                            doc.save(doc_io)
+                            doc_io.seek(0)
                         
-                        # Salvar em memória
-                        doc_io = io.BytesIO()
-                        doc.save(doc_io)
-                        doc_io.seek(0)
-                        
-                        # Download button
-                        st.download_button(
-                            label="📥 Download Contrato",
-                            data=doc_io,
-                            file_name=f"{selected_template}_preenchido_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            help="Clique para baixar o contrato gerado"
-                        )
+                            # Download button
+                            st.download_button(
+                                label="📥 Download Contrato",
+                                data=doc_io,
+                                file_name=f"{selected_template}_preenchido_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                help="Clique para baixar o contrato gerado"
+                            )
                         
                     except Exception as e:
                         st.error(f"❌ Erro ao gerar contrato: {str(e)}")
@@ -242,8 +239,10 @@ class GeradorContratosStreamlit:
             return
         
         try:
-            # Carrega e valida o documento
+            # Aqui usamos o _self
             doc = self.load_document(st.session_state.original_file)
+            if not doc:
+                return
             
             # Valida o template
             if problems := self.validate_template(doc):
@@ -259,29 +258,3 @@ class GeradorContratosStreamlit:
             self.auto_backup(doc, name)
             
             data = {
-                "variables": list(st.session_state.variables.keys()),
-                "last_modified": datetime.now().isoformat(),
-                "version": "1.0"
-            }
-            
-            # Salva metadata
-            with open(template_path / f"{name}.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            # Salva documento
-            doc.save(template_path / f"{name}.docx")
-            
-            st.success("✅ Modelo salvo com sucesso!")
-            st.session_state.variables = {}
-            st.session_state.current_content = ""
-            st.session_state.original_file = None
-            
-            logging.info(f"Template salvo com sucesso: {name}")
-            
-        except Exception as e:
-            st.error(f"❌ Erro ao salvar: {str(e)}")
-            logging.error(f"Erro ao salvar template {name}: {str(e)}")
-
-if __name__ == "__main__":
-    app = GeradorContratosStreamlit()
-    app.main()
