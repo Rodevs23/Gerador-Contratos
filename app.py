@@ -51,11 +51,13 @@ def process_document(template_name, values):
     
     for paragraph in doc.paragraphs:
         for var_name, value in values.items():
-            if f"#{var_name}#" in paragraph.text:
+            placeholder = f"#{var_name}#"
+            if placeholder in paragraph.text:
+                print(f"Encontrado {placeholder} no texto: {paragraph.text}")
                 for run in paragraph.runs:
-                    if f"#{var_name}#" in run.text:
-                        new_text = run.text.replace(f"#{var_name}#", value)
-                        run.text = new_text
+                    if placeholder in run.text:
+                        run.text = run.text.replace(placeholder, str(value))
+                        print(f"Substituído em run: {run.text}")
     
     doc_bytes = io.BytesIO()
     doc.save(doc_bytes)
