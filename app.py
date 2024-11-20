@@ -66,7 +66,7 @@ def main():
     # Header com logo da Consult
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.image("logo.png", width=300)
+        st.image("logo.jpg", width=300)
 
     # Menu principal com botões
     col1, col2 = st.columns(2)
