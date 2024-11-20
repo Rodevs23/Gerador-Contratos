@@ -1,186 +1,276 @@
 import streamlit as st
-import json
-from pathlib import Path
 from docx import Document
+from pathlib import Path
+import json
 import io
+import os
+import logging
+from datetime import datetime
 
+# Configuração do logging
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-def read_docx(file):
-    """Lê o conteúdo do arquivo .docx"""
-    doc = Document(file)
-    full_text = []
-    for para in doc.paragraphs:
-        full_text.append(para.text)
-    return '\n'.join(full_text)
+class GeradorContratosStreamlit:
+    def __init__(self):
+        st.set_page_config(
+            page_title="Gerador de Contratos",
+            layout="wide",
+            page_icon="📄"
+        )
+        self.initialize_session_state()
+        self.setup_folders()
 
+    def setup_folders(self):
+        """Cria as pastas necessárias para o funcionamento do sistema"""
+        for folder in ['templates', 'backups', 'temp']:
+            Path(folder).mkdir(exist_ok=True)
 
-def save_template(name, content, variables, original_file):
-    """Salva o template com suas variáveis e o arquivo original"""
-    template_path = Path("templates")
-    template_path.mkdir(exist_ok=True)
-    
-    data = {
-        "content": content,
-        "variables": variables
-    }
-    
-    with open(template_path / f"{name}.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    original_file.seek(0)
-    with open(template_path / f"{name}.docx", "wb") as f:
-        f.write(original_file.read())
+    def initialize_session_state(self):
+        """Inicializa as variáveis de estado do Streamlit"""
+        if 'current_content' not in st.session_state:
+            st.session_state.current_content = ""
+        if 'variables' not in st.session_state:
+            st.session_state.variables = {}
+        if 'original_file' not in st.session_state:
+            st.session_state.original_file = None
 
+    @st.cache_data
+    def load_document(self, file):
+        """Carrega o documento com cache do Streamlit"""
+        return Document(file)
 
-def load_templates():
-    """Carrega os templates salvos"""
-    template_path = Path("templates")
-    template_path.mkdir(exist_ok=True)
-    
-    templates = {}
-    for file in template_path.glob("*.json"):
-        with open(file, "r", encoding="utf-8") as f:
-            templates[file.stem] = json.load(f)
-    return templates
+    def validate_template(self, doc):
+        """Valida o template do documento"""
+        problems = []
+        try:
+            for paragraph in doc.paragraphs:
+                # Verifica formatação complexa
+                if len(paragraph.runs) > 50:
+                    problems.append("Parágrafo com formatação muito complexa")
+                
+                # Verifica marcadores inválidos
+                text = paragraph.text
+                if text.count('#') % 2 != 0:
+                    problems.append("Marcadores # não estão fechados corretamente")
+                
+                # Verifica tabelas complexas
+                if len(doc.tables) > 10:
+                    problems.append("Documento possui muitas tabelas")
 
+        except Exception as e:
+            problems.append(f"Erro na validação: {str(e)}")
+        return problems
 
-def process_document(template_name, values):
-    """Processa o documento substituindo as variáveis"""
-    template_path = Path("templates")
-    doc = Document(template_path / f"{template_name}.docx")
-    
-    for paragraph in doc.paragraphs:
-        for var_name, value in values.items():
-            placeholder = f"#{var_name}#"
-            if placeholder in paragraph.text:
-                print(f"Encontrado {placeholder} no texto: {paragraph.text}")
+    def replace_text_keeping_format(self, doc, old_text, new_text):
+        """Substitui texto mantendo a formatação original"""
+        for paragraph in doc.paragraphs:
+            if old_text in paragraph.text:
                 for run in paragraph.runs:
-                    if placeholder in run.text:
-                        run.text = run.text.replace(placeholder, str(value))
-                        print(f"Substituído em run: {run.text}")
-    
-    doc_bytes = io.BytesIO()
-    doc.save(doc_bytes)
-    doc_bytes.seek(0)
-    return doc_bytes
+                    if old_text in run.text:
+                        run.text = run.text.replace(old_text, new_text)
 
+    def auto_backup(self, doc, filename):
+        """Cria backup automático do documento"""
+        backup_path = Path("backups")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        doc.save(backup_path / f"{filename}_{timestamp}.docx")
+        logging.info(f"Backup criado: {filename}_{timestamp}.docx")
 
-def main():
-    st.set_page_config(page_title="Gerador de Contratos", layout="wide")
+    def main(self):
+        st.title("🔖 Gerador de Contratos")
+        
+        tabs = st.tabs(["📝 Cadastrar Novo Modelo", "✨ Preencher Contrato"])
+        
+        with tabs[0]:
+            self.template_tab()
+        
+        with tabs[1]:
+            self.fill_tab()
 
-    # Inicializar estados
-    if "current_content" not in st.session_state:
-        st.session_state.current_content = ""
-    if "variables" not in st.session_state:
-        st.session_state.variables = {}
-    if "original_file" not in st.session_state:
-        st.session_state.original_file = None
-
-    st.title("Gerador de Contratos")
-
-    # Dividir em duas páginas
-    page = st.sidebar.radio("Navegação", ["Cadastrar Novo Modelo", "Preencher Contrato"])
-
-    if page == "Cadastrar Novo Modelo":
-        st.header("Cadastrar Novo Modelo de Contrato")
-
-        template_name = st.text_input("Nome do Modelo:", key="template_name")
-        uploaded_file = st.file_uploader("Carregar arquivo do contrato (.docx)", type="docx")
-
+    def template_tab(self):
+        st.subheader("📝 Cadastrar Novo Modelo")
+        
+        # Nome do modelo
+        template_name = st.text_input("Nome do Modelo")
+        
+        # Upload do arquivo
+        uploaded_file = st.file_uploader(
+            "Selecione o arquivo .docx",
+            type=['docx'],
+            help="Apenas arquivos .docx são aceitos"
+        )
+        
         if uploaded_file:
             try:
-                if not st.session_state.current_content:
-                    st.session_state.original_file = uploaded_file
-                    st.session_state.current_content = read_docx(uploaded_file)
+                doc = self.load_document(uploaded_file)
+                st.session_state.current_content = '\n'.join(para.text for para in doc.paragraphs)
+                st.session_state.original_file = uploaded_file
+                
+                # Área de texto
+                text_area = st.text_area(
+                    "Texto do Contrato",
+                    value=st.session_state.current_content,
+                    height=300
+                )
+                
+                # Adicionar variável
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_text = st.text_input("Texto selecionado")
+                with col2:
+                    var_name = st.text_input("Nome da variável").upper()
+                
+                if st.button("➕ Adicionar Variável"):
+                    if selected_text and var_name:
+                        self.add_variable(selected_text, var_name)
+                
+                # Lista de variáveis
+                st.subheader("📋 Variáveis Adicionadas")
+                for var, text in st.session_state.variables.items():
+                    st.text(f"#{var}#: {text}")
+                
+                # Salvar modelo
+                if st.button("💾 Salvar Modelo"):
+                    self.save_template(template_name)
+                
             except Exception as e:
-                st.error(f"Erro ao carregar o arquivo: {str(e)}")
-                return
+                st.error(f"❌ Erro ao carregar arquivo: {str(e)}")
+                logging.error(f"Erro ao carregar arquivo: {str(e)}")
 
-            # Mostrar o texto carregado
-            st.subheader("Texto do Contrato:")
-            st.text_area("Conteúdo do contrato:", st.session_state.current_content, height=300, disabled=True)
-
-            st.subheader("Adicionar Variáveis")
-            selected_text = st.text_area("Copie e cole a parte do texto a ser substituída:")
-            var_name = st.text_input("Nome da variável (sem espaços):").upper()
-
-            if st.button("Adicionar Variável"):
-                if selected_text.strip() and var_name.strip():
-                    if var_name in st.session_state.variables:
-                        st.warning(f"A variável {var_name} já foi adicionada!")
-                    else:
-                        new_content = st.session_state.current_content.replace(selected_text, f"#{var_name}#")
-                        if new_content == st.session_state.current_content:
-                            st.error("O texto selecionado não foi encontrado no contrato.")
-                        else:
-                            st.session_state.current_content = new_content
-                            st.session_state.variables[var_name] = selected_text
-                            st.success(f"Variável #{var_name}# adicionada com sucesso!")
-                else:
-                    st.error("Preencha todos os campos antes de adicionar.")
-
-            # Mostrar variáveis adicionadas
-            if st.session_state.variables:
-                st.subheader("Variáveis Adicionadas:")
-                for var_name, original_text in st.session_state.variables.items():
-                    st.write(f"**#{var_name}#**: {original_text}")
-
-            # Botão para salvar
-            if st.button("Salvar Modelo"):
-                if not template_name.strip():
-                    st.error("Digite um nome para o modelo!")
-                else:
-                    try:
-                        save_template(
-                            template_name,
-                            st.session_state.current_content,
-                            list(st.session_state.variables.keys()),
-                            st.session_state.original_file
-                        )
-                        st.success("Modelo salvo com sucesso!")
-                        st.session_state.current_content = ""
-                        st.session_state.variables = {}
-                        st.session_state.original_file = None
-                        st.experimental_rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao salvar: {str(e)}")
-
-    elif page == "Preencher Contrato":
-        st.header("Preencher Contrato")
-
-        templates = load_templates()
+    def fill_tab(self):
+        st.subheader("✨ Preencher Contrato")
+        
+        # Carregar templates disponíveis
+        template_path = Path("templates")
+        templates = [f.stem for f in template_path.glob("*.json")]
+        
         if not templates:
-            st.warning("Nenhum modelo cadastrado. Cadastre um modelo primeiro!")
+            st.warning("⚠️ Nenhum modelo cadastrado ainda!")
             return
+        
+        # Seleção do modelo
+        selected_template = st.selectbox(
+            "Selecione o Modelo",
+            options=templates,
+            help="Escolha o modelo de contrato"
+        )
+        
+        if selected_template:
+            try:
+                with open(template_path / f"{selected_template}.json", "r", encoding="utf-8") as f:
+                    template = json.load(f)
+                
+                # Criar campos para cada variável
+                values = {}
+                for var in template["variables"]:
+                    values[var] = st.text_input(f"📝 {var}")
+                
+                if st.button("🔄 Gerar Contrato"):
+                    try:
+                        doc = self.load_document(template_path / f"{selected_template}.docx")
+                        
+                        # Substituir variáveis preservando formatação
+                        for var_name, value in values.items():
+                            if not value:  # Validação de campos vazios
+                                st.warning(f"⚠️ Campo {var_name} está vazio!")
+                                return
+                            placeholder = f"#{var_name}#"
+                            self.replace_text_keeping_format(doc, placeholder, value)
+                        
+                        # Criar backup antes de gerar
+                        self.auto_backup(doc, f"{selected_template}_preenchido")
+                        
+                        # Salvar em memória
+                        doc_io = io.BytesIO()
+                        doc.save(doc_io)
+                        doc_io.seek(0)
+                        
+                        # Download button
+                        st.download_button(
+                            label="📥 Download Contrato",
+                            data=doc_io,
+                            file_name=f"{selected_template}_preenchido_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            help="Clique para baixar o contrato gerado"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"❌ Erro ao gerar contrato: {str(e)}")
+                        logging.error(f"Erro ao gerar contrato {selected_template}: {str(e)}")
+            
+            except Exception as e:
+                st.error(f"❌ Erro ao carregar template: {str(e)}")
+                logging.error(f"Erro ao carregar template {selected_template}: {str(e)}")
 
-        template_name = st.selectbox("Selecione o Modelo:", options=list(templates.keys()))
+    def add_variable(self, selected_text, var_name):
+        """Adiciona uma nova variável"""
+        if not var_name:
+            st.warning("⚠️ Nome da variável não pode ser vazio!")
+            return
+            
+        if var_name in st.session_state.variables:
+            st.warning("⚠️ Variável já existe!")
+            return
+        
+        st.session_state.variables[var_name] = selected_text
+        st.success(f"✅ Variável {var_name} adicionada com sucesso!")
+        logging.info(f"Variável adicionada: {var_name}")
 
-        if template_name:
-            template = templates[template_name]
-
-            st.subheader("Preencher Dados")
-            values = {}
-            for var in template["variables"]:
-                values[var] = st.text_input(f"{var}:")
-
-            if st.button("Gerar Contrato"):
-                empty_fields = [var for var, val in values.items() if not val.strip()]
-                if empty_fields:
-                    st.error("Preencha todos os campos!")
+    def save_template(self, name):
+        """Salva o template com todas as validações"""
+        if not name:
+            st.warning("⚠️ Digite um nome para o modelo!")
+            return
+        
+        if not st.session_state.original_file:
+            st.warning("⚠️ Carregue um arquivo primeiro!")
+            return
+        
+        try:
+            # Carrega e valida o documento
+            doc = self.load_document(st.session_state.original_file)
+            
+            # Valida o template
+            if problems := self.validate_template(doc):
+                st.warning("⚠️ Problemas encontrados no template:")
+                for p in problems:
+                    st.write(f"- {p}")
+                if not st.button("Continuar mesmo assim"):
                     return
-
-                try:
-                    doc_bytes = process_document(template_name, values)
-                    st.download_button(
-                        "Baixar Contrato",
-                        doc_bytes,
-                        file_name=f"{template_name}_preenchido.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-                    st.success("Contrato gerado com sucesso!")
-                except Exception as e:
-                    st.error(f"Erro ao gerar contrato: {str(e)}")
-
+            
+            template_path = Path("templates")
+            
+            # Cria backup antes de salvar
+            self.auto_backup(doc, name)
+            
+            data = {
+                "variables": list(st.session_state.variables.keys()),
+                "last_modified": datetime.now().isoformat(),
+                "version": "1.0"
+            }
+            
+            # Salva metadata
+            with open(template_path / f"{name}.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # Salva documento
+            doc.save(template_path / f"{name}.docx")
+            
+            st.success("✅ Modelo salvo com sucesso!")
+            st.session_state.variables = {}
+            st.session_state.current_content = ""
+            st.session_state.original_file = None
+            
+            logging.info(f"Template salvo com sucesso: {name}")
+            
+        except Exception as e:
+            st.error(f"❌ Erro ao salvar: {str(e)}")
+            logging.error(f"Erro ao salvar template {name}: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    app = GeradorContratosStreamlit()
+    app.main()
