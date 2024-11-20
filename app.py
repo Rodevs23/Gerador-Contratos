@@ -24,6 +24,11 @@ class GeradorContratosStreamlit:
         self.initialize_session_state()
         self.setup_folders()
 
+    @staticmethod
+    @st.cache_data
+    def load_document(file):
+        """Carrega o documento com cache do Streamlit"""
+        return Document(file)
     def setup_folders(self):
         """Cria as pastas necessárias para o funcionamento do sistema"""
         for folder in ['templates', 'backups', 'temp']:
