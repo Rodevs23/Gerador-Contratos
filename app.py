@@ -1,146 +1,198 @@
-import React, { useState, useRef } from 'react';
-import { Card } from '@/components/ui/card';
-import { Save, Tag } from 'lucide-react';
+import streamlit as st
+from docx import Document
+import pandas as pd
+import os
+from datetime import datetime
+import io
 
-const TemplateEditor = () => {
-  const [selectedTexts, setSelectedTexts] = useState([]);
-  const [showNamePrompt, setShowNamePrompt] = useState(false);
-  const [selectedRange, setSelectedRange] = useState(null);
-  
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    if (!selection.toString().trim()) return;
+# Configuração da página
+st.set_page_config(
+    page_title="Sistema de Contratos - Consult Contabilidade",
+    page_icon="📄",
+    layout="wide"
+)
 
-    const range = selection.getRangeAt(0);
-    setSelectedRange(range);
-    setShowNamePrompt(true);
-  };
+# Estilo personalizado
+st.markdown("""
+    <style>
+    /* Cores corporativas */
+    :root {
+        --primary-color: #005B96;
+        --secondary-color: #6497B1;
+    }
+    
+    /* Header */
+    .header {
+        background-color: var(--primary-color);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+        text-align: center;
+    }
+    
+    /* Botões */
+    .stButton>button {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+    }
+    
+    /* Cards */
+    .card {
+        background-color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-  return (
-    <div className="max-w-6xl mx-auto p-4">
-      {/* Header */}
-      <div className="bg-[#005B96] p-8 rounded-lg mb-6 text-center">
-        <img 
-          src="/api/placeholder/200/80" 
-          alt="Consult Contabilidade" 
-          className="mx-auto mb-4 bg-white p-2 rounded"
-        />
-        <h1 className="text-2xl font-bold text-white">Criar Modelo de Contrato</h1>
-      </div>
+# Função para carregar ou criar banco de modelos
+@st.cache_data
+def load_templates():
+    if 'templates.csv' not in os.listdir():
+        df = pd.DataFrame(columns=['nome', 'arquivo', 'variaveis'])
+        df.to_csv('templates.csv', index=False)
+    return pd.read_csv('templates.csv')
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Documento Original */}
-        <Card className="p-6">
-          <div className="relative">
-            <div className="absolute top-2 right-2 bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
-              Selecione o texto para marcar como variável
-            </div>
-            
-            {/* Documento com texto selecionável */}
-            <div 
-              className="font-serif space-y-4 mt-12 cursor-text select-text"
-              onMouseUp={handleTextSelection}
-            >
-              <h3 className="text-center font-bold mb-6">
-                CONTRATO DE PRESTAÇÃO DE SERVIÇOS CONTÁBEIS
-              </h3>
-              
-              <p className="text-justify leading-relaxed">
-                Por este instrumento particular de Contrato de Prestação de Serviços Contábeis que 
-                fazem entre si, de um lado, BGE TRANSPORTES EIRELI, com sede na cidade de Cambé, 
-                Estado do Paraná, na Av Jose Bonifácio, nº 3401...
-              </p>
-            </div>
+# Função para processar documento
+def process_document(doc_bytes, replacements):
+    doc = Document(io.BytesIO(doc_bytes))
+    
+    for paragraph in doc.paragraphs:
+        for key, value in replacements.items():
+            if f'#{key}#' in paragraph.text:
+                paragraph.text = paragraph.text.replace(f'#{key}#', value)
+    
+    # Também substituir em tabelas
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for key, value in replacements.items():
+                    if f'#{key}#' in cell.text:
+                        cell.text = cell.text.replace(f'#{key}#', value)
+    
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+    return output
 
-            {/* Pop-up para nomear variável */}
-            {showNamePrompt && (
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white p-6 rounded-lg shadow-2xl border w-96">
-                <div className="mb-4">
-                  <h4 className="text-lg font-semibold text-gray-700 mb-2">
-                    Texto Selecionado:
-                  </h4>
-                  <div className="bg-blue-50 p-2 rounded text-sm">
-                    {selectedRange?.toString()}
-                  </div>
-                </div>
+def main():
+    # Header
+    st.markdown("""
+        <div class="header">
+            <h1>Sistema de Contratos - Consult Contabilidade</h1>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Menu principal
+    menu = st.sidebar.selectbox(
+        "Escolha uma opção",
+        ["Gerar Contrato", "Gerenciar Modelos"]
+    )
+    
+    if menu == "Gerar Contrato":
+        show_contract_generation()
+    else:
+        show_template_management()
 
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Nome da Variável:
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full p-2 border rounded"
-                    placeholder="Ex: RAZAO_SOCIAL"
-                    autoFocus
-                    onChange={(e) => e.target.value = e.target.value.toUpperCase()}
-                  />
-                </div>
+def show_contract_generation():
+    st.subheader("Gerar Novo Contrato")
+    
+    # Carregar modelos
+    df_templates = load_templates()
+    if len(df_templates) == 0:
+        st.warning("Nenhum modelo cadastrado. Por favor, adicione um modelo primeiro.")
+        return
+    
+    # Seleção do modelo
+    template_name = st.selectbox("Selecione o Modelo", df_templates['nome'].tolist())
+    
+    # Carregar template selecionado
+    template = df_templates[df_templates['nome'] == template_name].iloc[0]
+    variables = eval(template['variaveis'])
+    
+    # Formulário de preenchimento
+    with st.form("contract_form"):
+        st.subheader("Preencha as informações")
+        
+        # Criar campos dinâmicos
+        values = {}
+        col1, col2 = st.columns(2)
+        
+        for i, var in enumerate(variables):
+            with col1 if i % 2 == 0 else col2:
+                values[var] = st.text_input(var.replace('_', ' ').title())
+        
+        submitted = st.form_submit_button("Gerar Contrato")
+        
+        if submitted:
+            try:
+                # Processar documento
+                doc_bytes = template['arquivo'].encode()
+                output = process_document(doc_bytes, values)
+                
+                # Download
+                st.download_button(
+                    label="📥 Download do Contrato",
+                    data=output,
+                    file_name=f"contrato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                
+                st.success("Contrato gerado com sucesso!")
+                
+            except Exception as e:
+                st.error(f"Erro ao gerar contrato: {str(e)}")
 
-                <div className="flex justify-end gap-2">
-                  <button 
-                    className="px-4 py-2 border rounded text-gray-600"
-                    onClick={() => setShowNamePrompt(false)}
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    className="px-4 py-2 bg-blue-600 text-white rounded"
-                    onClick={() => {
-                      // Adicionar à lista de variáveis
-                      setSelectedTexts([...selectedTexts, {
-                        text: selectedRange.toString(),
-                        variableName: document.querySelector('input').value,
-                      }]);
-                      setShowNamePrompt(false);
-                    }}
-                  >
-                    Confirmar
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
+def show_template_management():
+    st.subheader("Gerenciar Modelos")
+    
+    # Mostrar modelos existentes
+    st.write("### Modelos Cadastrados")
+    df_templates = load_templates()
+    if len(df_templates) > 0:
+        for _, row in df_templates.iterrows():
+            col1, col2, col3 = st.columns([3,1,1])
+            with col1:
+                st.write(row['nome'])
+            with col2:
+                st.write(f"{len(eval(row['variaveis']))} variáveis")
+            with col3:
+                st.button("🗑️ Excluir", key=f"del_{row['nome']}")
+    
+    # Adicionar novo modelo
+    st.write("### Adicionar Novo Modelo")
+    with st.form("new_template"):
+        nome = st.text_input("Nome do Modelo")
+        arquivo = st.file_uploader("Arquivo do Modelo (.docx)", type=['docx'])
+        variaveis = st.text_area(
+            "Variáveis (uma por linha)",
+            help="Digite as variáveis que serão substituídas no documento"
+        )
+        
+        submitted = st.form_submit_button("Salvar Modelo")
+        
+        if submitted and nome and arquivo and variaveis:
+            try:
+                vars_list = [v.strip() for v in variaveis.split('\n') if v.strip()]
+                new_template = pd.DataFrame({
+                    'nome': [nome],
+                    'arquivo': [arquivo.read()],
+                    'variaveis': [str(vars_list)]
+                })
+                
+                df_templates = pd.concat([df_templates, new_template], ignore_index=True)
+                df_templates.to_csv('templates.csv', index=False)
+                
+                st.success("Modelo salvo com sucesso!")
+                st.experimental_rerun()
+                
+            except Exception as e:
+                st.error(f"Erro ao salvar modelo: {str(e)}")
 
-        {/* Painel de Variáveis */}
-        <Card className="p-6">
-          <h2 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2">
-            <Tag className="w-5 h-5" />
-            Variáveis Marcadas
-          </h2>
-
-          {selectedTexts.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">
-              Selecione trechos do texto para marcar como variáveis
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {selectedTexts.map((item, index) => (
-                <div key={index} className="bg-gray-50 p-4 rounded-lg border">
-                  <div className="text-sm text-gray-600 mb-1">Texto Original:</div>
-                  <div className="bg-blue-50 p-2 rounded mb-2 text-sm">
-                    {item.text}
-                  </div>
-                  <div className="text-sm text-gray-600 mb-1">Será substituído por:</div>
-                  <div className="font-mono text-blue-600 bg-blue-50 p-2 rounded text-sm">
-                    #{item.variableName}#
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-6 flex justify-end">
-            <button className="px-6 py-2 bg-[#005B96] text-white rounded-lg hover:bg-[#004b7a] flex items-center gap-2">
-              <Save className="w-4 h-4" />
-              Salvar Modelo
-            </button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-};
-
-export default TemplateEditor;
+if __name__ == "__main__":
+    main()
